@@ -7,7 +7,7 @@ namespace RenokiCo\PhpK8s\Exceptions\API;
 use RenokiCo\PhpK8s\Exceptions\KubernetesAPIException;
 use RenokiCo\PhpK8s\Exceptions\WithPayload;
 
-class RequestException extends \RuntimeException implements KubernetesAPIException
+abstract class ResponseException extends \RuntimeException implements KubernetesAPIException
 {
     use WithPayload;
 

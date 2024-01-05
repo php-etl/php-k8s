@@ -3,8 +3,15 @@
 namespace RenokiCo\PhpK8s\Traits\Cluster;
 
 use GuzzleHttp\Client;
+use GuzzleHttp\Exception\BadResponseException;
 use GuzzleHttp\Exception\ClientException;
 use GuzzleHttp\Exception\ConnectException;
+use GuzzleHttp\Exception\GuzzleException;
+use GuzzleHttp\Exception\InvalidArgumentException;
+use GuzzleHttp\Exception\RequestException;
+use GuzzleHttp\Exception\ServerException;
+use GuzzleHttp\Exception\TooManyRedirectsException;
+use GuzzleHttp\Exception\TransferException;
 use GuzzleHttp\RequestOptions;
 use RenokiCo\PhpK8s\Exceptions;
 use RenokiCo\PhpK8s\ResourcesList;
@@ -91,14 +98,27 @@ trait MakesHttpCalls
 
         try {
             $response = $this->getClient()->request($method, $this->getCallableUrl($path, $query), $options);
+        } catch (InvalidArgumentException $exception) {
+            throw new Exceptions\API\InvalidArgumentException('You provided an invalid argument to the API client: '.$exception->getMessage(), previous: $exception);
+        } catch (TooManyRedirectsException $exception) {
+            throw new Exceptions\API\TooManyRedirectsException('The cluster is responding with too many redirect responses. Please check the networking configuration.', previous: $exception);
         } catch (ConnectException $exception) {
             throw new Exceptions\API\ClusterNotReachableException('The cluster could not be reached.', 0, $exception);
+        } catch (ServerException $exception) {
+            $errorPayload = \json_decode((string) $exception->getResponse()->getBody(), true);
+            // @todo handle 5xx responses properly
+            throw new Exceptions\API\UnexpectedResponseException(
+                $exception->getMessage(),
+                $exception->getResponse()->getStatusCode(),
+                $errorPayload,
+                $exception,
+            );
         } catch (ClientException $exception) {
             $errorPayload = \json_decode((string) $exception->getResponse()->getBody(), true);
 
             switch ($exception->getCode()) {
                 case 400:
-                    throw new Exceptions\API\BadRequestException('The server did not accept your request. You may check your cluster\'s API version compatibility.', $errorPayload, $exception);
+                    throw new Exceptions\API\BadResponseException('The server did not accept your request. You may check your cluster\'s API version compatibility.', $errorPayload, $exception);
                 case 401:
                     throw new Exceptions\API\NotAuthorizedException('You are not authorized to access this resource with the current context.', $errorPayload, $exception);
                 case 403:
@@ -108,12 +128,36 @@ trait MakesHttpCalls
                 case 405:
                     throw new Exceptions\API\MethodNotAllowedException('The operation is not allowed on this resource.', $errorPayload, $exception);
                 case 409:
-                    throw new Exceptions\API\ConflictException('A resource with the same name or identifier already exists. You should prefer updating tis resource.', $errorPayload, $exception);
+                    throw new Exceptions\API\ConflictException('A resource with the same name or identifier already exists. You should prefer updating this resource.', $errorPayload, $exception);
+                case 413:
+                    throw new Exceptions\API\ContentTooLargeException('The request payload you sent is too large, the cluster API responded it could not process the request due to this reason.', $errorPayload, $exception);
+                case 414:
+                    throw new Exceptions\API\URITooLongException('The request URI you sent is too long, the cluster API responded it could not process the request due to this reason.', $errorPayload, $exception);
                 case 429:
                     throw new Exceptions\API\TooManyRequestsException('You have sent too many requests to the cluster API. Please lower your API request rate.', $errorPayload, $exception);
                 default:
-                    throw new Exceptions\API\RequestException($exception->getMessage(), $exception->getCode(), $errorPayload, $exception);
+                    throw new Exceptions\API\UnexpectedResponseException(
+                        $exception->getMessage(),
+                        $exception->getResponse()->getStatusCode(),
+                        $errorPayload,
+                        $exception,
+                    );
             }
+        } catch (BadResponseException $exception) {
+            $errorPayload = \json_decode((string) $exception->getResponse()->getBody(), true);
+
+            throw new Exceptions\API\UnexpectedResponseException(
+                $exception->getMessage(),
+                $exception->getResponse()->getStatusCode(),
+                $errorPayload,
+                $exception,
+            );
+        } catch (RequestException $exception) {
+            throw new Exceptions\API\RequestFailureException('The request to the cluster API failed to be constructed properly. You should contact your system administrator to investigate the origin of the error.', previous: $exception);
+        } catch (TransferException $exception) {
+            throw new Exceptions\API\ServiceUnavailableException('An error occurred on the networking side, we could not send your request to the cluster API. You should contact your system administrator to investigate the origin of the error.');
+        } catch (GuzzleException $exception) {
+            throw new \RuntimeException('An unexpected error happened in the Guzzle HTTP client implementation.', previous: $exception);
         }
 
         return $response;

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace RenokiCo\PhpK8s\Exceptions\API;
 
-final class ResourceNotFoundException extends RequestException
+final class ResourceNotFoundException extends ResponseException
 {
     public function __construct(string $message = '', $payload = null, ?\Throwable $previous = null)
     {
